@@ -13,3 +13,6 @@ Dans **Settings > Pages** :
 - Source : Deploy from a branch
 - Branch : main
 - Folder : / (root)
+
+
+Déploiement GitHub Pages relancé.
