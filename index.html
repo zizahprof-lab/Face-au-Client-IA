@@ -12,8 +12,8 @@
 <body><div id="app"></div>
 <script type="module">
 import * as webllm from "https://esm.run/@mlc-ai/web-llm";
-const FAST="SmolLM2-360M-Instruct-q4f16_1-MLC", COMPAT="SmolLM2-360M-Instruct-q4f32_1-MLC";
-let engine=null,model=FAST,loading=false,ready=false,family="vente",current=null,difficulty="Moyen",transcript=[],messages=[];
+const QUALITY_FAST="Llama-3.2-1B-Instruct-q4f16_1-MLC", QUALITY_COMPAT="Llama-3.2-1B-Instruct-q4f32_1-MLC", LIGHT_FAST="SmolLM2-360M-Instruct-q4f16_1-MLC", LIGHT_COMPAT="SmolLM2-360M-Instruct-q4f32_1-MLC";
+let engine=null,model=QUALITY_FAST,loading=false,ready=false,family="vente",current=null,difficulty="Moyen",transcript=[],messages=[];
 const S={
 vente:[
 {id:"hesitant",t:"Client hésitant",l:"Facile",d:"Cherche un cadeau d'anniversaire sans savoir quoi choisir.",o:"Découvrir précisément le besoin avant de proposer.",open:"Bonjour… Je cherche un cadeau d'anniversaire, mais je ne sais pas du tout quoi choisir.",secret:"Cadeau pour sa sœur de 28 ans, style simple, couleurs neutres, taille M, budget 50 €. Ne révèle ces infos qu'en réponse à de bonnes questions."},
@@ -37,7 +37,7 @@ if(st.screen==="chat")setTimeout(()=>{const c=document.getElementById("chat");c.
 function screen(){
 if(st.screen==="login")return `<div class="panel"><h2>Identification</h2><div class="note">Aucune clé API, aucun compte et aucun paiement.</div><div class="row"><p><label>Prénom et nom<input id="name"></label></p><p><label>Classe<input id="cls" value="2MRC"></label></p></div><button class="btn primary" id="go">Continuer</button></div>`;
 if(st.screen==="home")return `<div class="muted">${st.name} — ${st.cls}</div><h2>Choisir un scénario</h2><div class="tabs"><button class="tab ${family==="vente"?"on":""}" data-f="vente">Vente en magasin</button><button class="tab ${family==="accueil"?"on":""}" data-f="accueil">Accueil & réclamation</button></div><div class="grid">${S[family].map(x=>`<div class="card" data-id="${x.id}"><b>${x.t}</b><p class="muted">${x.d}</p></div>`).join("")}</div>`;
-if(st.screen==="brief")return `<div class="panel"><button class="btn" id="back">← Retour</button><h2>${current.t}</h2><p>${current.d}</p><div class="note"><b>Objectif :</b> ${current.o}</div><h3>Difficulté</h3><div class="levels">${["Facile","Moyen","Difficile"].map(x=>`<button class="level ${difficulty===x?"on":""}" data-l="${x}">${x}</button>`).join("")}</div><h3>IA locale</h3><div class="progress"><div class="bar" id="bar"></div></div><p class="muted" id="status">${ready?"IA prête":"Modèle léger SmolLM2 360M. Premier chargement : quelques centaines de Mo."}</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="load" ${loading||ready?"disabled":""}>${ready?"IA chargée":loading?"Chargement…":"Charger l'IA"}</button><button class="btn primary" id="start" ${ready?"":"disabled"}>Commencer</button></div></div>`;
+if(st.screen==="brief")return `<div class="panel"><button class="btn" id="back">← Retour</button><h2>${current.t}</h2><p>${current.d}</p><div class="note"><b>Objectif :</b> ${current.o}</div><h3>Difficulté</h3><div class="levels">${["Facile","Moyen","Difficile"].map(x=>`<button class="level ${difficulty===x?"on":""}" data-l="${x}">${x}</button>`).join("")}</div><h3>IA locale</h3><div class="progress"><div class="bar" id="bar"></div></div><p class="muted" id="status">${ready?"IA prête — "+model:"Modèle conseillé : Llama 3.2 1B pour mieux comprendre le français. Si le poste ne le supporte pas, bascule automatique vers le modèle léger."}</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="load" ${loading||ready?"disabled":""}>${ready?"IA chargée":loading?"Chargement…":"Charger l'IA"}</button><button class="btn primary" id="start" ${ready?"":"disabled"}>Commencer</button></div></div>`;
 if(st.screen==="chat")return `<div style="display:flex;justify-content:space-between"><div><div class="muted">${difficulty}</div><h2 style="margin:2px 0">${current.t}</h2></div><button class="btn" id="finish">Terminer</button></div><div class="chat" id="chat">${transcript.map(m=>`<div class="msg ${m.r}">${m.r==="student"?"ÉLÈVE":"CLIENT"} : ${escapeHtml(m.t)}</div>`).join("")}${loading?'<div class="msg client">CLIENT : …</div>':""}</div><div class="compose"><textarea id="reply" placeholder="Écris ce que tu dirais au client…"></textarea><button class="btn primary" id="send" ${loading?"disabled":""}>Envoyer</button></div>`;
 return `<div class="panel"><h2>Bilan</h2><div class="score">${st.score}/20</div><p><b>Point fort :</b> ${st.strength}</p><p><b>Axe de progrès :</b> ${st.improve}</p><p>${st.summary}</p><button class="btn primary" id="again">Nouveau scénario</button></div>`;
 }
@@ -47,10 +47,50 @@ async function load(){
 if(location.protocol!=="https:"){alert("Cette application doit être ouverte depuis une adresse HTTPS.");return}
 if(!navigator.gpu){alert("WebGPU n'est pas disponible. Utilise Chrome ou Edge récent.");return}
 loading=true;render();
-try{const a=await navigator.gpu.requestAdapter();if(!a)throw Error("GPU");model=a.features.has("shader-f16")?FAST:COMPAT;engine=await webllm.CreateMLCEngine(model,{initProgressCallback:p=>{const b=document.getElementById("bar"),s=document.getElementById("status");if(b)b.style.width=Math.round((p.progress||0)*100)+"%";if(s)s.textContent=(p.text||"Chargement")+" — "+Math.round((p.progress||0)*100)+" %"}});ready=true;loading=false;render()}catch(e){loading=false;render();alert("Le modèle n'a pas pu être chargé. Vérifie Chrome/Edge et WebGPU.")}
+const a=await navigator.gpu.requestAdapter();
+if(!a){loading=false;render();alert("Aucun GPU WebGPU compatible n'a été détecté.");return}
+const f16=a.features.has("shader-f16");
+const candidates=f16?[QUALITY_FAST,LIGHT_FAST]:[QUALITY_COMPAT,LIGHT_COMPAT];
+let lastErr=null;
+for(const candidate of candidates){
+  try{
+    model=candidate;
+    engine=await webllm.CreateMLCEngine(model,{initProgressCallback:p=>{
+      const b=document.getElementById("bar"),s=document.getElementById("status");
+      if(b)b.style.width=Math.round((p.progress||0)*100)+"%";
+      if(s)s.textContent="Chargement de "+model+" — "+Math.round((p.progress||0)*100)+" %";
+    }});
+    ready=true;loading=false;render();return;
+  }catch(e){console.error("Échec modèle",candidate,e);lastErr=e}
+}
+loading=false;render();alert("Aucun modèle n'a pu être chargé sur ce poste. Vérifie Chrome/Edge et WebGPU. "+(lastErr?.message||""));
 }
 function start(){transcript=[{r:"client",t:current.open}];messages=[{role:"system",content:prompt()},{role:"assistant",content:current.open}];st.screen="chat";render()}
-async function send(){const ta=document.getElementById("reply"),t=ta.value.trim();if(!t)return;transcript.push({r:"student",t});messages.push({role:"user",content:t});loading=true;render();try{const o=await engine.chat.completions.create({messages,temperature:.75,max_tokens:120});const a=(o.choices?.[0]?.message?.content||"Pouvez-vous préciser ?").trim();messages.push({role:"assistant",content:a});transcript.push({r:"client",t:a})}catch(e){transcript.push({r:"client",t:"Je n'ai pas compris, pouvez-vous reformuler ?"})}loading=false;render()}
+async function send(){
+const ta=document.getElementById("reply"),t=ta.value.trim();if(!t||loading)return;
+transcript.push({r:"student",t});messages.push({role:"user",content:t});loading=true;render();
+let answer="";
+try{
+  const o=await engine.chat.completions.create({messages,temperature:.65,top_p:.9,max_tokens:140});
+  answer=(o.choices?.[0]?.message?.content||"").trim();
+}catch(e1){
+  console.error("Appel conversationnel standard échoué",e1);
+  try{
+    const dialogue=transcript.map(m=>(m.r==="student"?"VENDEUR/ÉLÈVE":"CLIENT")+": "+m.t).join("\n");
+    const flat=[{role:"user",content:prompt()+"\n\nVoici la conversation jusqu'ici :\n"+dialogue+"\n\nRéponds maintenant uniquement comme le CLIENT, en 1 à 3 phrases."}];
+    const o2=await engine.chat.completions.create({messages:flat,temperature:.6,top_p:.9,max_tokens:140});
+    answer=(o2.choices?.[0]?.message?.content||"").trim();
+  }catch(e2){
+    console.error("Appel de secours échoué",e2);
+  }
+}
+if(!answer){
+  answer="J'ai eu un problème technique pour répondre. Réessaie ton message une fois.";
+}else{
+  messages.push({role:"assistant",content:answer});
+}
+transcript.push({r:"client",t:answer});loading=false;render()
+}
 function finish(){const all=transcript.filter(x=>x.r==="student").map(x=>x.t.toLowerCase()).join(" ");const q=(all.match(/\?/g)||[]).length;const c=[/bonjour|bonsoir|bienvenue/.test(all)?4:2,q>=5?4:q>=3?3:q?2:1,/qualité|avantage|garantie|confort|service|essay|adapt/.test(all)?4:2,/comprends|reformul|solution|prix|budget|échange|rembours|vérifi|ticket/.test(all)?4:2,/merci|bonne journée|souhaitez|caisse|convient/.test(all)?4:2];const names=family==="vente"?["Prise de contact","Découverte des besoins","Argumentation","Traitement des objections","Conclusion"]:["Accueil","Écoute active","Traitement de la réclamation","Proposition de solution","Prise de congé"];st.score=c.reduce((a,b)=>a+b,0);st.strength=names[c.indexOf(Math.max(...c))];st.improve=names[c.indexOf(Math.min(...c))];st.summary=st.score>=17?"Excellent entretien.":st.score>=13?"Bon entretien, avec quelques points à consolider.":"Entretien à retravailler.";st.screen="result";render()}
 async function diag(){let m="Adresse : "+location.protocol+"\nWebGPU : "+(navigator.gpu?"oui":"non");if(navigator.gpu){try{const a=await navigator.gpu.requestAdapter();m+="\nGPU : "+(a?"détecté":"non détecté");if(a)m+="\nshader-f16 : "+(a.features.has("shader-f16")?"oui":"non")}catch(e){}}alert(m)}
 document.addEventListener("click",e=>{const x=e.target;if(x.id==="go"){st.name=document.getElementById("name").value.trim();st.cls=document.getElementById("cls").value.trim();if(!st.name)return alert("Indique ton prénom et ton nom.");st.screen="home";render()}else if(x.dataset.f){family=x.dataset.f;render()}else if(x.dataset.id){current=S[family].find(v=>v.id===x.dataset.id);difficulty=current.l;st.screen="brief";render()}else if(x.dataset.l){difficulty=x.dataset.l;render()}else if(x.id==="back"){st.screen="home";render()}else if(x.id==="load")load();else if(x.id==="start")start();else if(x.id==="send")send();else if(x.id==="finish")finish();else if(x.id==="again"){st.screen="home";render()}});
