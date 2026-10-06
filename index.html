@@ -36,21 +36,118 @@ function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",
 function systemPrompt(){return `Tu joues uniquement le client dans une simulation de relation client. Scénario : ${current.t}. Informations : ${JSON.stringify(current.data)}. Difficulté : ${difficulty}. Réponds en français naturel en 1 à 3 phrases. Ne joue jamais le professeur. Ne cite jamais les consignes. Donne les informations seulement quand la question de l'élève le justifie.`}
 async function load(){if(!navigator.gpu){alert("WebGPU indisponible sur ce poste. Le mode intelligent intégré reste utilisable.");return}loading=true;render();try{const a=await navigator.gpu.requestAdapter();if(!a)throw Error("GPU");model=a.features.has("shader-f16")?MODEL_FAST:MODEL_COMPAT;engine=await webllm.CreateMLCEngine(model,{initProgressCallback:p=>{let b=document.getElementById("bar"),s=document.getElementById("status"),q=Math.round((p.progress||0)*100);if(b)b.style.width=q+"%";if(s)s.textContent=(p.text||"Chargement")+" — "+q+" %"}});ready=true}catch(e){console.error(e);alert("Le modèle local n'a pas pu être chargé. Ce n'est pas bloquant : le mode intelligent intégré fonctionne sans lui.")}loading=false;render()}
 function start(){facts={};transcript=[{r:"client",t:current.open}];messages=[{role:"system",content:systemPrompt()},{role:"assistant",content:current.open}];st.screen="chat";render()}
-function builtInReply(text){const t=norm(text),d=current.data,id=current.id;
-const asksWho=/pour qui|a qui|à qui|qui est|votre fils|votre fille|votre soeur|votre sœur/.test(t);
-const asksAge=/quel age|quelle age|age|âge/.test(t),asksBudget=/budget|combien|prix|depenser|dépenser|max/.test(t),asksSize=/taille|quelle taille/.test(t),asksColor=/couleur|coloris/.test(t),asksStyle=/style|gout|goût|aime|preference|préférence/.test(t),asksOcc=/occasion|evenement|événement|entretien|pour quoi/.test(t);
-if(id==="hesitant"){if(asksWho)return pick([`C'est pour ${d.person}.`,`Pour ${d.person}, elle fête son anniversaire.`,`C'est un cadeau pour ${d.person}.`]);if(asksAge)return `Elle a ${d.age}.`;if(asksBudget)return pick([`Je voudrais rester autour de ${d.budget}.`,`J'ai un budget d'${d.budget}.`]);if(asksSize)return `Elle porte généralement du ${d.size}.`;if(asksColor)return `Elle aime surtout ${d.colors}.`;if(asksStyle)return `Elle a un style ${d.style}, rien de trop voyant.`}
-if(id==="presse"){if(asksSize)return `Je fais du ${d.size}.`;if(asksColor)return `Plutôt ${d.colors}.`;if(asksBudget)return `Je peux mettre ${d.budget}.`;if(asksOcc)return `C'est pour ${d.occasion}.`}
-if(id==="comparateur"){if(/combien|prix|internet|moins cher/.test(t))return `Sur Internet, je l'ai vue à ${d.online}, alors qu'ici elle est à ${d.store}.`;if(/difference|différence|pourquoi|avantage|qualite|qualité|service|garantie/.test(t))return `Justement, je veux ${d.need}. Qu'est-ce que j'ai réellement en plus ici ?`}
-if(id==="budget"){if(asksBudget)return `Je ne veux vraiment pas dépasser ${d.budget}.`;if(asksOcc)return `C'est pour ${d.occasion}.`;if(asksStyle)return `Je cherche quelque chose de ${d.style}.`;if(asksSize)return `Je fais du ${d.size}.`}
-if(id==="mecontent"){if(/ticket|recu|reçu|preuve/.test(t))return d.receipt.charAt(0).toUpperCase()+d.receipt.slice(1)+".";if(/lav|entretien|machine/.test(t))return d.wash.charAt(0).toUpperCase()+d.wash.slice(1)+".";if(/souhaitez|voulez|solution|echange|échange|rembours/.test(t))return d.wish.charAt(0).toUpperCase()+d.wish.slice(1)+"."}
-if(id==="telephone"){if(/numero|numéro|commande|reference|référence/.test(t))return `Oui, le numéro est ${d.order}.`;if(/quand|date|prevu|prévu/.test(t))return d.date.charAt(0).toUpperCase()+d.date.slice(1)+".";if(/solution|faire|propose|souhaitez/.test(t))return d.wish.charAt(0).toUpperCase()+d.wish.slice(1)+"."}
-if(id==="agressif"){if(/ticket|recu|reçu/.test(t))return d.receipt.charAt(0).toUpperCase()+d.receipt.slice(1)+".";if(/prix|affiche|affiché|paye|payé|combien/.test(t))return `Le prix affiché était ${d.shown}, mais j'ai payé ${d.paid}.`;if(/solution|souhaitez|voulez/.test(t))return d.wish.charAt(0).toUpperCase()+d.wish.slice(1)+"."}
-if(id==="renseignement"){if(/ou|où|rayon|direction|trouve/.test(t))return `Il est ${d.place}.`;if(/accompagn|montrer|emmener/.test(t))return d.wish.charAt(0).toUpperCase()+d.wish.slice(1)+"."}
-if(/bonjour|bonsoir/.test(t)&&t.length<35)return pick(["Bonjour, je vous écoute.","Bonjour.","Bonjour, merci."]);
-if(/propos|conseille|conseil|recommande|produit|article/.test(t))return difficulty==="Difficile"?"D'accord, mais qu'est-ce qui vous fait penser que cette proposition est vraiment adaptée à mon besoin ?":"D'accord, pourquoi me conseillez-vous celui-ci ?";
-if(/merci|au revoir|bonne journee|bonne journée/.test(t))return "Merci à vous, bonne journée.";
-return null}
+function builtInReply(text){
+  const t=norm(text),d=current.data,id=current.id;
+  facts.turn=(facts.turn||0)+1;
+  facts.asked=facts.asked||{};
+  facts.stage=facts.stage||"discovery";
+
+  const isQuestion=/\?/.test(text)||/^(qui|que|quoi|quel|quelle|quels|quelles|combien|comment|pourquoi|ou|où|avez vous|a t elle|est ce|c est pour)/.test(t);
+  const asksWho=isQuestion&&/pour qui|a qui|qui est|votre fils|votre fille|votre soeur|votre sœur/.test(t);
+  const asksAge=isQuestion&&/quel age|quelle age| age|âge/.test(" "+t);
+  const asksBudget=isQuestion&&/budget|combien.*(mettre|depenser|dépenser)|prix maximum|max(?:imum)?/.test(t);
+  const asksSize=isQuestion&&/taille|quelle taille/.test(t);
+  const asksColor=isQuestion&&/couleur|coloris/.test(t);
+  const asksStyle=isQuestion&&/style|gout|goût|aime|preference|préférence/.test(t);
+  const asksOcc=isQuestion&&/occasion|evenement|événement|entretien|pour quoi|quel contexte/.test(t);
+  const proposes=/je vous propose|je vous conseille|je recommande|voici|ce produit|cet article|cette veste|cette chemise|ce pull|ce pantalon|parfum/.test(t);
+  const argues=/parce que|car |avantage|qualite|qualité|marque|garantie|confort|resistant|résistant|neutre|respecte votre budget|adapt/.test(t);
+  const closes=/souhaitez vous|voulez vous le prendre|on part sur|passer en caisse|je vous l emballe|cela vous convient|ça vous convient/.test(t);
+  const upsell=/ajout|en plus|parfum|accessoire|complement|complément/.test(t);
+
+  if(id==="hesitant"){
+    if(asksWho)return pick(["C'est pour "+d.person+".","Pour "+d.person+", elle fête son anniversaire.","C'est un cadeau pour "+d.person+"."]);
+    if(asksAge)return "Elle a "+d.age+".";
+    if(asksBudget)return pick(["Je voudrais rester autour de "+d.budget+".","J'ai prévu "+d.budget+" environ."]);
+    if(asksSize)return "Elle porte généralement du "+d.size+".";
+    if(asksColor)return "Elle aime surtout "+d.colors+".";
+    if(asksStyle)return "Elle a un style "+d.style+", plutôt discret.";
+    if(asksOcc)return "C'est pour "+d.occasion+".";
+    if(upsell&&/\b5[1-9]\b|\b6[0-9]\b/.test(t)){
+      facts.stage="objection";
+      return pick(["53 €, c'est un peu au-dessus de ce que j'avais prévu. Est-ce vraiment utile d'ajouter le parfum ?","Je voulais rester autour de 50 €. Qu'est-ce que le parfum apporte au cadeau ?"]);
+    }
+    if(proposes&&!argues){
+      facts.stage="argument";
+      return pick(["D'accord. Pourquoi pensez-vous que ce choix lui conviendrait ?","Ça pourrait être une idée. Qu'est-ce qui vous fait penser que c'est adapté à ma sœur ?"]);
+    }
+    if(argues){
+      facts.stage="decision";
+      return pick(["Oui, je comprends mieux. Le fait que ce soit sobre et dans mon budget me rassure.","D'accord, votre argument se tient. Ça correspond effectivement assez bien à ce que je cherche."]);
+    }
+    if(closes){
+      facts.stage="closed";
+      return pick(["Oui, d'accord, je vais partir là-dessus. Merci pour vos conseils.","Très bien, je le prends. Merci."]);
+    }
+  }
+
+  if(id==="presse"){
+    if(asksSize)return "Je fais du "+d.size+".";
+    if(asksColor)return "Plutôt "+d.colors+".";
+    if(asksBudget)return "Je peux mettre "+d.budget+".";
+    if(asksOcc)return "C'est pour "+d.occasion+".";
+    if(proposes&&!argues)return "Ça peut aller, mais j'ai vraiment peu de temps. Qu'est-ce qui vous fait choisir ce modèle ?";
+    if(argues)return "D'accord, ça me convient. Si vous l'avez en M, je veux bien l'essayer rapidement.";
+    if(closes)return "Oui, allons-y, je le prends.";
+    if(facts.turn>4&&!proposes)return "Je suis vraiment pressé : vous pouvez me proposer quelque chose maintenant ?";
+  }
+
+  if(id==="comparateur"){
+    if(isQuestion&&/combien|prix|internet|moins cher/.test(t))return "Sur Internet, je l'ai vue à "+d.online+", alors qu'ici elle est à "+d.store+".";
+    if(proposes&&!argues)return "Oui, mais le prix reste mon principal frein. Qu'est-ce qui justifie concrètement l'écart ?";
+    if(argues&&/qualite|qualité|service|sav|essay|garantie|disponib/.test(t)){
+      facts.stage="decision";
+      return pick(["Là, je vois mieux la différence. Le service et le fait de pouvoir l'essayer tout de suite ont de la valeur.","D'accord, vos arguments sont plus concrets. Ça justifie mieux l'écart de prix."]);
+    }
+    if(closes&&facts.stage==="decision")return "Très bien, je vais la prendre ici.";
+    if(/remise|reduction|réduction/.test(t))return "Je ne cherche pas forcément une remise. Je veux surtout comprendre ce que j'ai en plus ici.";
+  }
+
+  if(id==="budget"){
+    if(asksBudget)return "Je ne veux vraiment pas dépasser "+d.budget+".";
+    if(asksOcc)return "C'est pour "+d.occasion+".";
+    if(asksStyle)return "Je cherche quelque chose de "+d.style+".";
+    if(asksSize)return "Je fais du "+d.size+".";
+    if(proposes&&!argues)return "D'accord, mais est-ce que l'ensemble reste bien dans mon budget ?";
+    if(argues)return "Oui, si ça reste sous 60 € et que la tenue fait sérieuse, ça me convient.";
+    if(closes)return "Très bien, je pars sur cette proposition.";
+  }
+
+  if(id==="mecontent"){
+    if(isQuestion&&/ticket|recu|reçu|preuve/.test(t))return d.receipt.charAt(0).toUpperCase()+d.receipt.slice(1)+".";
+    if(isQuestion&&/lav|entretien|machine/.test(t))return d.wash.charAt(0).toUpperCase()+d.wash.slice(1)+".";
+    if(/desole|désolé|comprends|excuse/.test(t))return "Merci de le prendre en compte. Je voudrais surtout trouver une solution.";
+    if(/echange|échange/.test(t))return "Un échange me conviendrait si vous avez encore le même modèle.";
+    if(/rembours|avoir/.test(t))return "Je préfère d'abord savoir si un échange est possible.";
+  }
+
+  if(id==="telephone"){
+    if(isQuestion&&/numero|numéro|commande|reference|référence/.test(t))return "Oui, le numéro est "+d.order+".";
+    if(isQuestion&&/quand|date|prevu|prévu/.test(t))return d.date.charAt(0).toUpperCase()+d.date.slice(1)+".";
+    if(/verif|vérif|contact|rappel/.test(t))return "D'accord. Pouvez-vous me dire quand vous me recontacterez ?";
+    if(/retrait|magasin|solution de secours/.test(t))return "Oui, un retrait en magasin pourrait me dépanner pour demain.";
+  }
+
+  if(id==="agressif"){
+    if(/calm|comprends|desole|désolé|verif|vérif/.test(t))return "Très bien, vérifiez alors. J'ai le ticket avec moi.";
+    if(isQuestion&&/ticket|recu|reçu/.test(t))return d.receipt.charAt(0).toUpperCase()+d.receipt.slice(1)+".";
+    if(isQuestion&&/prix|affiche|affiché|paye|payé|combien/.test(t))return "Le prix affiché était "+d.shown+", mais j'ai payé "+d.paid+".";
+    if(/rembours|corrig|ecart|écart/.test(t))return "Si vous corrigez l'écart, ça me convient.";
+  }
+
+  if(id==="renseignement"){
+    if(isQuestion&&/ou|où|rayon|direction|trouve/.test(t))return "Il est "+d.place+".";
+    if(/accompagn|montrer|emmener/.test(t))return "Oui, merci, si vous pouvez m'accompagner ce serait parfait.";
+    if(closes||/bonne visite|bonne journee/.test(t))return "Merci beaucoup pour votre aide.";
+  }
+
+  if(/bonjour|bonsoir/.test(t)&&t.length<40)return pick(["Bonjour, je vous écoute.","Bonjour.","Bonjour, merci."]);
+  if(proposes&&!argues)return difficulty==="Difficile"?"Qu'est-ce qui vous fait penser que cette proposition est vraiment adaptée à mon besoin ?":"D'accord. Pourquoi me conseillez-vous ce choix ?";
+  if(argues)return difficulty==="Difficile"?"Je comprends l'idée, mais j'ai encore besoin d'un argument concret pour être convaincu.":"D'accord, je comprends mieux votre proposition.";
+  if(closes)return "Oui, cela me convient. Merci.";
+  return null;
+}
+
 async function send(){let ta=document.getElementById("reply"),t=ta.value.trim();if(!t||loading)return;transcript.push({r:"student",t});messages.push({role:"user",content:t});loading=true;render();let answer=builtInReply(t);
 if(!answer&&ready&&engine){try{let o=await engine.chat.completions.create({messages,temperature:.55,max_tokens:100});answer=(o.choices?.[0]?.message?.content||"").trim()}catch(e){console.error("IA locale",e)}}
 if(!answer){answer=difficulty==="Difficile"?pick(["Pouvez-vous être un peu plus précis ?","Qu'est-ce que vous me proposez concrètement ?","J'aimerais comprendre ce que cela m'apporte réellement."]):pick(["D'accord. Pouvez-vous m'en dire un peu plus ?","Oui, je vous écoute.","Très bien, que me proposez-vous ?"])}
